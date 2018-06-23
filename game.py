@@ -5,6 +5,9 @@ from pyglet.gl import *
 from pyglet.window import key as KEY
 from pyglet import clock
 
+# Opensimplex imports
+from opensimplex import OpenSimplex
+
 # Other imports
 import random
 import math
@@ -23,10 +26,20 @@ class Blocks:
         1: {
             "texture": "glass.png",
             "solid": False
+        },
+        2: {
+            "texture": "dirt.png",
+            "solid": True
+        },
+        3: {
+            "texture": "grass.png",
+            "solid": True
         }
     }
     brick = 0
     glass = 1
+    dirt = 2
+    grass = 3
 
 class Position:
     """
@@ -44,6 +57,9 @@ class Position:
 
     def __sub__(self, other):
         return Position(self.x - other.x, self.y - other.y, self.z - other.z)
+
+    def __mul__(self, other):
+        return Position(self.x * other.x, self.y * other.y, self.z * other.z)
 
     def tuple(self):
         return (self.x, self.y, self.z)
@@ -74,16 +90,31 @@ class Textures:
 
         # Check if texture exists in library
         if Textures.library.get(block) == None:
-            # Load texture
-            file = Blocks.properties[block]["texture"]
-            texture = pyglet.image.load(file).texture
-            
-            # Set filtering to nearest, so that pixel art isn't blurry
-            glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
-            glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
 
-            # Put TextureGroup of the texture into the texture library
-            Textures.library[block] = pyglet.graphics.TextureGroup(texture)
+            # Load texture
+            file = pyglet.image.load(Blocks.properties[block]["texture"])
+            side_coordinates = {
+                "top": (16, 32, 16, 16),
+                "bottom": (16, 0, 16, 16),
+                "front": (16, 16, 16, 16),
+                "back": (16, 48, 16, 16),
+                "left": (0, 32, 16, 16),
+                "right": (32, 32, 16, 16)
+            }
+            sides = {}
+            
+            
+            for side in side_coordinates:
+                texture = file.get_region(*side_coordinates[side]).texture
+
+                # Set filtering to nearest, so that pixel art isn't blurry
+                glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+                glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+
+                sides[side] = pyglet.graphics.TextureGroup(texture)
+            
+            # Put aides of the texture into the texture library
+            Textures.library[block] = sides
 
         # Return texture
         return Textures.library.get(block)
@@ -93,7 +124,7 @@ class Chunk:
     Stores and renders the blocks
     """
 
-    chunks = []
+    chunks = {}
 
     def is_inbounds(self, position):
         """
@@ -131,28 +162,63 @@ class Chunk:
         """
         
         # Convert position into tuple and check that tuple again block dict
-        return self.blocks[position.tuple()]
+        try:
+            return self.blocks[position.tuple()]
+        except:
+            return Blocks.glass
 
     def __init__(self, chunk_x, chunk_y, chunk_z):
         """
         Create the chunk
         """
         
-        # Generate chunk
-        self.batch = pyglet.graphics.Batch()
+        # Create the basic chunk properties
+        self.position = Position(chunk_x, chunk_y, chunk_z) * Position(16, 16, 16)
         self.blocks = {}
-
-        # Create 16x16 cube of random glass or brick
-        for x in range(16):
-            for y in range(16):
-                for z in range(16):
-                    self.blocks[(x, y, z)] = random.randint(0, 1)
-
-        # Generate the batch
+        self.batch = pyglet.graphics.Batch()
+        
+        # Generate the chunk then generate the batch
+        self.generate_chunk()
         self.generate_batch()
 
         # Add chunk to chunk list
-        Chunk.chunks.append(self)
+        Chunk.chunks[self.position.tuple()] = self
+
+    def generate_chunk(self):
+        """
+        Generate chunk
+        """
+
+        def generate_height(x, y):
+            """
+            Generates a random height based on simplex noise
+            """
+            
+            return int((Window.instance.simp.noise2d(x/16 - 0.5, y/16 - 0.5) / 2.0 + 0.5)*10)
+        
+        # Interate over the x and z values for the chunk
+        for x in range(16):
+            for z in range(16):
+                # Get the real positions based on chunk positions
+                real_x = self.position.x + x
+                real_z = self.position.z + z
+
+                # Generate a random height
+                height = generate_height(real_x, real_z)
+
+                # Create the blocks for the height
+                for y in range(height):
+
+                    # Topmost blocks are grass
+                    if y == height-1:
+                        block = Blocks.grass
+
+                    # The rest are dirt
+                    else:
+                        block = Blocks.dirt
+
+                    # Add block to chunk
+                    self.blocks[(x, y, z)] = block
 
     def generate_batch(self):
         """
@@ -170,36 +236,36 @@ class Chunk:
             # Get block type and texture
             block_type = self.get_block(block_position)
             block_tex = Window.textures.get(block_type)
-            
+
             # Bottom corner
-            x, y, z = block_position.tuple()
+            x, y, z = (block_position + self.position).tuple() 
 
             # Top opposite corner
             X, Y, Z = x + 1, y + 1, z + 1
 
             # If the block on the top is not solid, add it to the chunk's batch
             if not self.is_solid(block_position + Position(0, 1, 0)):
-                self.batch.add(4, GL_QUADS, block_tex, ('v3f', (x,Y,Z, X,Y,Z, X,Y,z, x,Y,z)), texture_coordinates)
+                self.batch.add(4, GL_QUADS, block_tex["top"], ('v3f', (x,Y,Z, X,Y,Z, X,Y,z, x,Y,z)), texture_coordinates)
 
             # If the block on the bottom is not solid, add it to the chunk's batch
             if not self.is_solid(block_position - Position(0, 1, 0)):
-                self.batch.add(4, GL_QUADS, block_tex, ('v3f', (x,y,z, X,y,z, X,y,Z, x,y,Z)), texture_coordinates)
+                self.batch.add(4, GL_QUADS, block_tex["bottom"], ('v3f', (x,y,z, X,y,z, X,y,Z, x,y,Z)), texture_coordinates)
 
             # If the block on the left is not solid, add it to the chunk's batch
             if not self.is_solid(block_position - Position(1, 0, 0)):
-                self.batch.add(4, GL_QUADS, block_tex, ('v3f', (x,y,z, x,y,Z, x,Y,Z, x,Y,z)), texture_coordinates)
+                self.batch.add(4, GL_QUADS, block_tex["left"], ('v3f', (x,y,z, x,y,Z, x,Y,Z, x,Y,z)), texture_coordinates)
 
             # If the block on the right is not solid, add it to the chunk's batch
             if not self.is_solid(block_position + Position(1, 0, 0)):
-                self.batch.add(4, GL_QUADS, block_tex, ('v3f', (X,y,Z, X,y,z, X,Y,z, X,Y,Z)), texture_coordinates)
+                self.batch.add(4, GL_QUADS, block_tex["right"], ('v3f', (X,y,Z, X,y,z, X,Y,z, X,Y,Z)), texture_coordinates)
 
             # If the block on the front is not solid, add it to the chunk's batch
             if not self.is_solid(block_position + Position(0, 0, 1)):
-                self.batch.add(4, GL_QUADS, block_tex, ('v3f', (x,y,Z, X,y,Z, X,Y,Z, x,Y,Z)), texture_coordinates)
+                self.batch.add(4, GL_QUADS, block_tex["front"], ('v3f', (x,y,Z, X,y,Z, X,Y,Z, x,Y,Z)), texture_coordinates)
 
             # If the block on the back is not solid, add it to the chunk's batch
             if not self.is_solid(block_position - Position(0, 0, 1)):
-                self.batch.add(4, GL_QUADS, block_tex, ('v3f', (X,y,z, x,y,z, x,Y,z, X,Y,z)), texture_coordinates)
+                self.batch.add(4, GL_QUADS, block_tex["back"], ('v3f', (X,y,z, x,y,z, x,Y,z, X,Y,z)), texture_coordinates)
 
     def draw(self):
         self.batch.draw()
@@ -314,6 +380,7 @@ class Window(pyglet.window.Window):
 
         # Initialize pyglet.window.Window with it's self as window
         super().__init__(*args, **kwargs)
+        Window.instance = self
 
         # Set minimum size to 300, 200
         self.set_minimum_size(300, 200)
@@ -328,8 +395,14 @@ class Window(pyglet.window.Window):
         # Create player
         self.player = Player()
 
-        # Create test chunk
-        self.chunk = Chunk(0, 0, 0)
+        # Generate seed and create generator
+        self.seed = int(random.random() * 100000)
+        self.simp = OpenSimplex(seed = self.seed)
+
+        # Create an 8x8 map of chunks
+        for x in range(8):
+            for z in range(8):
+                Chunk(x, 0, z)
 
     def on_mouse_motion(self, x, y, dx, dy):
         """
@@ -376,7 +449,9 @@ class Window(pyglet.window.Window):
         glTranslatef(-self.player.pos.x, -self.player.pos.y, -self.player.pos.z)
 
         # Draw chunk
-        self.chunk.draw()
+        for chunk in Chunk.chunks:
+            chunk = Chunk.chunks[chunk]
+            chunk.draw()
 
         # Set render mode to 2D
         self.set_mode("2D")
