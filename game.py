@@ -70,10 +70,10 @@ class Rotation:
     A class for rotations
     """
 
-    def __init__(self, x, y):
+    def __init__(self, yaw, pitch):
 
-        self.x = x
-        self.y = y
+        self.yaw = yaw
+        self.pitch = pitch
 
 class Textures:
     """
@@ -83,25 +83,25 @@ class Textures:
     # Create library
     library = {}
 
-    def get(self, block):
+    def get(self, block_id):
         """
-        Gets a texture
+        Gets a texture from a block id
         """
 
         # Check if texture exists in library
-        if Textures.library.get(block) == None:
+        if Textures.library.get(block_id) == None:
             # Load texture
-            texture = pyglet.image.load(Blocks.properties[block]["texture"]).texture
+            texture = pyglet.image.load(Blocks.properties[block_id]["texture"]).texture
 
             # Set filtering to nearest, so that pixel art isn't blurry
             glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
             glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
 
             # Save texture to library for later use
-            Textures.library[block] = pyglet.graphics.TextureGroup(texture)
+            Textures.library[block_id] = pyglet.graphics.TextureGroup(texture)
 
         # Return texture
-        return Textures.library.get(block)
+        return Textures.library.get(block_id)
 
 class Chunk:
     """
@@ -132,24 +132,16 @@ class Chunk:
         Check if giving position is solid
         """
 
-        # If the position is inbound, return the property "solid" of that block
-        if self.is_inbounds(position):
-            return Blocks.properties[self.get_block(position)]["solid"]
-
-        # Otherwise, return false
-        else:
-            return False
+        # If the position is inside the chunk, return the property "solid" of that block, otherwise, return false
+        return Blocks.properties[self.get_block(position)]["solid"] if position.tuple() in self.blocks else False
 
     def get_block(self, position):
         """
         Returns the block id at a given position
         """
         
-        # Convert position into tuple and check that tuple again block dict
-        try:
-            return self.blocks[position.tuple()]
-        except:
-            return Blocks.glass
+        # Convert position into tuple and check that tuple again block dict        
+        return self.blocks[position.tuple()] if position.tuple() in self.blocks else None
 
     def __init__(self, chunk_x, chunk_y, chunk_z):
         """
@@ -217,43 +209,43 @@ class Chunk:
         texture_coordinates["side"] = ("t2f", (1/4,0, 2/4,0, 2/4,1, 1/4,1))
 
         # Go through the blocks
-        for block_position in self.blocks:
+        for block_tuple in self.blocks:
             # Turn block position into the position class
-            block_position = Position(*block_position)
+            block_position = Position(*block_tuple)
             
             # Get block type and texture
             block_type = self.get_block(block_position)
             block_tex = Window.textures.get(block_type)
 
             # Bottom corner
-            x, y, z = (block_position + self.position).tuple() 
+            low_x, low_y, low_z = (block_position + self.position).tuple() 
 
             # Top opposite corner
-            X, Y, Z = x + 1, y + 1, z + 1
+            big_x, big_y, big_z = low_x + 1, low_y + 1, low_z + 1
 
             # If the block on the top is not solid, add it to the chunk's batch
             if not self.is_solid(block_position + Position(0, 1, 0)):
-                self.batch.add(4, GL_QUADS, block_tex, ('v3f', (x,Y,Z, X,Y,Z, X,Y,z, x,Y,z)), texture_coordinates["top"])
+                self.batch.add(4, GL_QUADS, block_tex, ('v3f', (low_x,big_y,big_z, big_x,big_y,big_z, big_x,big_y,low_z, low_x,big_y,low_z)), texture_coordinates["top"])
 
             # If the block on the bottom is not solid, add it to the chunk's batch
             if not self.is_solid(block_position - Position(0, 1, 0)):
-                self.batch.add(4, GL_QUADS, block_tex, ('v3f', (x,y,z, X,y,z, X,y,Z, x,y,Z)), texture_coordinates["bottom"])
+                self.batch.add(4, GL_QUADS, block_tex, ('v3f', (low_x,low_y,low_z, big_x,low_y,low_z, big_x,low_y,big_z, low_x,low_y,big_z)), texture_coordinates["bottom"])
 
             # If the block on the left is not solid, add it to the chunk's batch
             if not self.is_solid(block_position - Position(1, 0, 0)):
-                self.batch.add(4, GL_QUADS, block_tex, ('v3f', (x,y,z, x,y,Z, x,Y,Z, x,Y,z)), texture_coordinates["side"])
+                self.batch.add(4, GL_QUADS, block_tex, ('v3f', (low_x,low_y,low_z, low_x,low_y,big_z, low_x,big_y,big_z, low_x,big_y,low_z)), texture_coordinates["side"])
 
             # If the block on the right is not solid, add it to the chunk's batch
             if not self.is_solid(block_position + Position(1, 0, 0)):
-                self.batch.add(4, GL_QUADS, block_tex, ('v3f', (X,y,Z, X,y,z, X,Y,z, X,Y,Z)), texture_coordinates["side"])
+                self.batch.add(4, GL_QUADS, block_tex, ('v3f', (big_x,low_y,big_z, low_x,big_y,low_z, big_x,big_y,low_z, big_x,big_y,big_z)), texture_coordinates["side"])
 
             # If the block on the front is not solid, add it to the chunk's batch
             if not self.is_solid(block_position + Position(0, 0, 1)):
-                self.batch.add(4, GL_QUADS, block_tex, ('v3f', (x,y,Z, X,y,Z, X,Y,Z, x,Y,Z)), texture_coordinates["side"])
+                self.batch.add(4, GL_QUADS, block_tex, ('v3f', (low_x,low_y,big_z, big_x,low_y,big_z, big_x,big_y,big_z, low_x,big_y,big_z)), texture_coordinates["side"])
 
             # If the block on the back is not solid, add it to the chunk's batch
             if not self.is_solid(block_position - Position(0, 0, 1)):
-                self.batch.add(4, GL_QUADS, block_tex, ('v3f', (X,y,z, x,y,z, x,Y,z, X,Y,z)), texture_coordinates["side"])
+                self.batch.add(4, GL_QUADS, block_tex, ('v3f', (big_x,low_y,low_z, low_x,low_y,low_z, low_x,big_y,low_z, big_x,big_y,low_z)), texture_coordinates["side"])
 
     def draw(self):
         self.batch.draw()
@@ -282,11 +274,11 @@ class Player:
         dy /= 8
 
         # Rotate player based on mouse movement
-        self.rot.x += dy
-        self.rot.y -= dx
+        self.rot.yaw += dy
+        self.rot.pitch -= dx
 
         # Clamp rotation to 90 degrees
-        self.rot.x = clamp(self.rot.x, -90, 90)
+        self.rot.yaw = clamp(self.rot.yaw, -90, 90)
 
     def update(self, delta, keys):
         """
@@ -297,7 +289,7 @@ class Player:
         speed = delta*10
         
         # Get rotation
-        rot_y = (-self.rot.y / 180) * math.pi
+        rot_y = (-self.rot.pitch / 180) * math.pi
 
         # Calculate move based on rotation
         move_x, move_z = speed*math.sin(rot_y), speed*math.cos(rot_y)
@@ -431,8 +423,8 @@ class Window(pyglet.window.Window):
         glPushMatrix()
 
         # Rotate scene based on player rotation
-        glRotatef(-self.player.rot.x, 1, 0, 0)
-        glRotatef(-self.player.rot.y, 0, 1, 0)
+        glRotatef(-self.player.rot.yaw, 1, 0, 0)
+        glRotatef(-self.player.rot.pitch, 0, 1, 0)
 
         # Move scene based on player position
         glTranslatef(-self.player.pos.x, -self.player.pos.y, -self.player.pos.z)
