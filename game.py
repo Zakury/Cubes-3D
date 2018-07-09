@@ -237,7 +237,7 @@ class Chunk:
 
             # If the block on the right is not solid, add it to the chunk's batch
             if not self.is_solid(block_position + Position(1, 0, 0)):
-                self.batch.add(4, GL_QUADS, block_tex, ('v3f', (big_x,low_y,big_z, low_x,big_y,low_z, big_x,big_y,low_z, big_x,big_y,big_z)), texture_coordinates["side"])
+                self.batch.add(4, GL_QUADS, block_tex, ('v3f', (big_x,low_y,big_z, big_x,low_y,low_z, big_x,big_y,low_z, big_x,big_y,big_z)), texture_coordinates["side"])
 
             # If the block on the front is not solid, add it to the chunk's batch
             if not self.is_solid(block_position + Position(0, 0, 1)):
